@@ -1,0 +1,97 @@
+# Processes .ill and mesh area file to MRT for each manikin
+# 2018.10.27 HDR
+
+# Instructions:
+# Place a copy of this file in a folder with the .ill and mesh area file.
+# Then, change pathnames as necessary below.
+
+import os
+import linecache
+
+#Source
+illFilePath = "scene..default_OneMan29_mod.ill"
+meshAreaPath = "mesh_area_single.txt"
+#destination
+mrtResultsPath = "mrt_result_single.csv"
+annualRadiationDiscomfortPath = "annualRadiationDiscomfort_single.csv"
+
+alphaSW = 0.67 #0.67 shortwave absorbtion for average reflectance clothing and skin
+alphaLW = 0.95 #0.95 longwave absorbtion for average reflectance clothing and skin
+Feff = 0.696 #0.696 for a seated person and 0.725 for a standing person
+hr = 6.012 #6.012 W/ m2 K
+
+#ARD Calcs
+ARDstart = 8
+ARDend = 18 #inclusive
+MRTthreshold = 4
+
+#--Edit below with care--
+
+#mesh area constants
+meshAreaFile = open(meshAreaPath, 'r')
+meshArea = []
+for line in meshAreaFile:
+    meshArea.append(float(line.rstrip('\n')))
+numMeshFaces = len(meshArea)
+print("number of faces in manikin:",numMeshFaces)
+totalMeshArea = sum(meshArea)
+print("total area of manikin:",totalMeshArea)
+meshAreaFile.close()
+
+#irradiance calculations
+numLines = sum(1 for line in open(illFilePath))
+numHeadLines = 9
+numMan = int((numLines - numHeadLines)/numMeshFaces)
+print("number of lines in file:",numLines)
+print("number of manikins:",numMan)
+
+manRad = []
+for i in range(numMan):
+    radHolderRate = []
+    radHolder = []
+    for j in range(numMeshFaces):
+        lineIndex = (numHeadLines + 1 + i*numMeshFaces + j)
+        lineContent = linecache.getline(illFilePath, lineIndex).split('\t ')
+        radHolderRate.append(lineContent)
+    for k in range(numMeshFaces):
+        radHolder.append([float(m) * meshArea[k] for m in radHolderRate[k]])
+    manRad.append(radHolder)
+
+manTotalRad = []
+for i in manRad:
+    manTotalRad.append([sum(x) for x in zip(*i)])
+
+
+#MRT Calculations
+MRTdelta = []
+for i in manTotalRad:
+    MRTdelta.append([(j / totalMeshArea * (alphaSW/alphaLW)) / (Feff*hr) for j in i])
+
+#ARD calculations
+ARD = []
+for man in MRTdelta:
+    totalCounter = 0
+    thresholdCounter = 0
+    for j in range(0,8760-23,24):
+        for i in range(ARDstart, ARDend + 1):
+            totalCounter += 1
+            if man[i+j] >= MRTthreshold:
+                thresholdCounter += 1
+    ARD.append(thresholdCounter/totalCounter)
+
+#write dMRT to file
+MRTdeltaFile = open(mrtResultsPath, 'w')
+for i in MRTdelta:
+    for j in i:
+        MRTdeltaFile.write(str(j) + ",")
+    MRTdeltaFile.write("\n")
+MRTdeltaFile.close()
+
+#write ARD to file
+ARDFile = open(annualRadiationDiscomfortPath, 'w')
+for i in ARD:
+    ARDFile.write(str(i) + "\n") 
+ARDFile.close()
+
+
+print("That's all Folks")
